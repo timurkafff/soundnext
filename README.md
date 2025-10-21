@@ -14,6 +14,8 @@ A modern web application for streaming and downloading music from SoundCloud, bu
 - 🔍 **Search tracks** by name - no URL needed!
 - 🎵 **Stream music** directly in your browser
 - 💾 **Download tracks** with embedded metadata and artwork
+- ❤️ **Like tracks** with beautiful animations
+- 👤 **Profile page** to view and manage your liked tracks
 - 🎨 **Beautiful UI** with modern design and smooth animations
 - ⚡ **Fast streaming** with smart caching
 - 📊 **Track information** including play counts and likes
@@ -84,14 +86,10 @@ The app will be available at `http://localhost:3000`
 1. **Start the backend server** (FastAPI on port 8000)
 2. **Start the frontend** (Next.js on port 3000)
 3. **Search for any track** by typing its name
-4. **Click on a track** from the search results
-5. **Play** the track directly in the browser or **download** it
-
-### Example searches to try:
-- "Billie Eilish bad guy"
-- "The Weeknd"
-- "Lo-fi beats"
-- Or paste a direct SoundCloud URL
+4. **Click on a track** to play it
+5. **Like tracks** by clicking the heart icon
+6. **View your liked tracks** in the Profile page
+7. **Download tracks** with embedded metadata
 
 ## API Endpoints 🔌
 
@@ -188,6 +186,10 @@ Contributions are welcome! Feel free to:
 - Submit pull requests
 
 
+## License 📄
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
 ## Acknowledgments 🙏
 
 - [soundcloud-lib](https://github.com/3jackdaws/soundcloud-lib) - SoundCloud API wrapper
@@ -196,58 +198,51 @@ Contributions are welcome! Feel free to:
 
 ## 💻 Desktop Application
 
-**SoundNext теперь доступен как нативное десктопное приложение!**
+**SoundNext is now available as a native desktop application!**
 
-### Быстрый старт:
+### Quick Start:
 
 ```bash
-# Полная сборка приложения
+# Build the application
 ./build_app.sh
 
-# Запустить готовое приложение
+# Run the app
 open backend/dist/SoundNext.app
 ```
 
-### Режим разработки:
-
-```bash
-# Разработка с PyWebView
-cd backend
-./run_dev.sh
-```
-
-📖 **Полная документация**: См. [DESKTOP_APP.md](./DESKTOP_APP.md)
-
-### Что нового:
-- ✅ Нативное приложение для macOS (.app)
-- ✅ Упаковано с PyInstaller - один файл, все включено
-- ✅ PyWebView GUI - быстрое и легкое
-- ✅ Исправлены баги (время трека, audio visualizer)
-- ✅ Автоматическая сборка одной командой
-- ✅ Кроссплатформенность (можно собрать для Windows/Linux)
+### Features:
+- ✅ Native macOS application (.app)
+- ✅ Packaged with PyInstaller - single file, everything included
+- ✅ PyWebView GUI - fast and lightweight
+- ✅ Cross-platform support (can be built for Windows/Linux)
 
 ---
 
 ## 📋 TODO / Future Features
 
+### Completed ✅
+- [x] ~~Like tracks functionality~~ ✅ **Done!**
+- [x] ~~Profile page with liked tracks~~ ✅ **Done!**
+- [x] ~~Beautiful like animations~~ ✅ **Done!**
+- [x] ~~Desktop app~~ ✅ **Done!**
+
 ### Planned Features
-- [ ] **User Profile System**
-  - User authentication (login/register)
-  - Profile page with user info
-  - Favorite tracks collection
+- [ ] **User Authentication**
+  - Login/Register system
+  - Cloud sync for liked tracks
   - Listening history
   - Custom playlists
-  - User preferences and settings
-
-### Other Ideas
-- [ ] Queue management (next/previous track)
-- [ ] Lyrics support
-- [ ] Social features (share tracks)
-- [ ] Dark/Light theme toggle
-- [ ] Keyboard shortcuts
-- [x] ~~Desktop app~~ ✅ **Done!**
-- [ ] Windows/Linux builds
-- [ ] Auto-updates for desktop app
+  
+- [ ] **Playback Features**
+  - Queue management (next/previous track)
+  - Shuffle and repeat modes
+  - Keyboard shortcuts
+  
+- [ ] **Additional Features**
+  - Lyrics support
+  - Dark/Light theme toggle
+  - Windows/Linux desktop builds
+  - Auto-updates for desktop app
 
 ---
 
