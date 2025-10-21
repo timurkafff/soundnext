@@ -194,6 +194,40 @@ Contributions are welcome! Feel free to:
 - [FastAPI](https://fastapi.tiangolo.com/) - Modern Python web framework
 - [Next.js](https://nextjs.org/) - React framework
 
+## 💻 Desktop Application
+
+**SoundNext теперь доступен как нативное десктопное приложение!**
+
+### Быстрый старт:
+
+```bash
+# Полная сборка приложения
+./build_app.sh
+
+# Запустить готовое приложение
+open backend/dist/SoundNext.app
+```
+
+### Режим разработки:
+
+```bash
+# Разработка с PyWebView
+cd backend
+./run_dev.sh
+```
+
+📖 **Полная документация**: См. [DESKTOP_APP.md](./DESKTOP_APP.md)
+
+### Что нового:
+- ✅ Нативное приложение для macOS (.app)
+- ✅ Упаковано с PyInstaller - один файл, все включено
+- ✅ PyWebView GUI - быстрое и легкое
+- ✅ Исправлены баги (время трека, audio visualizer)
+- ✅ Автоматическая сборка одной командой
+- ✅ Кроссплатформенность (можно собрать для Windows/Linux)
+
+---
+
 ## 📋 TODO / Future Features
 
 ### Planned Features
@@ -211,8 +245,10 @@ Contributions are welcome! Feel free to:
 - [ ] Social features (share tracks)
 - [ ] Dark/Light theme toggle
 - [ ] Keyboard shortcuts
-- [ ] Mobile app version
+- [x] ~~Desktop app~~ ✅ **Done!**
+- [ ] Windows/Linux builds
+- [ ] Auto-updates for desktop app
 
 ---
 
-Built with ❤️ using Next.js and FastAPI
+Built with ❤️ using Next.js, FastAPI and PyWebView

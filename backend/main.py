@@ -18,39 +18,29 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="SoundCloud Music Server", version="1.0.0")
 
-# Вспомогательная функция для создания безопасного имени файла
 def create_safe_filename(artist: str, title: str) -> str:
-    """
-    Создает безопасное имя файла, удаляя/заменяя проблемные символы.
-    Нормализует Unicode символы в ASCII.
-    """
     artist = artist or 'Unknown'
     title = title or 'Track'
     
-    # Нормализуем Unicode и конвертируем в ASCII
     artist_normalized = unicodedata.normalize('NFKD', artist).encode('ascii', 'ignore').decode('ascii')
     title_normalized = unicodedata.normalize('NFKD', title).encode('ascii', 'ignore').decode('ascii')
     
-    # Оставляем только безопасные символы
     safe_artist = "".join(c for c in artist_normalized if c.isalnum() or c in (' ', '-', '_')).strip()
     safe_title = "".join(c for c in title_normalized if c.isalnum() or c in (' ', '-', '_')).strip()
     
-    # Если после очистки ничего не осталось, используем значения по умолчанию
     safe_artist = safe_artist if safe_artist else 'Unknown'
     safe_title = safe_title if safe_title else 'Track'
     
     return f"{safe_artist} - {safe_title}.mp3"
 
-# Enable CORS для подключения фронтенда
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # В продакшене укажите конкретные домены
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Инициализация API
 api = SoundcloudAPI()
 TEMP_DIR = Path(tempfile.gettempdir()) / "soundcloud_downloads"
 TEMP_DIR.mkdir(exist_ok=True)
@@ -84,18 +74,15 @@ async def root():
 
 @app.get("/search", response_model=SearchResult)
 async def search_tracks(q: str, limit: int = 20):
-    """Поиск треков по названию"""
     if not q or len(q.strip()) < 2:
         raise HTTPException(status_code=400, detail="Query must be at least 2 characters")
     
     try:
         logger.info(f"Searching for: {q}")
         
-        # Получаем client_id если его еще нет
         if not api.client_id:
             await api.get_credentials()
         
-        # Используем SoundCloud API для поиска
         search_url = f"https://api-v2.soundcloud.com/search/tracks"
         params = {
             "q": q,
@@ -114,7 +101,6 @@ async def search_tracks(q: str, limit: int = 20):
                 tracks = []
                 for item in data.get("collection", []):
                     if item.get("kind") == "track":
-                        # Создаем Track объект из результата поиска
                         track = Track(obj=item, client=api)
                         
                         track_info = TrackInfo(
@@ -143,7 +129,6 @@ async def search_tracks(q: str, limit: int = 20):
 
 @app.get("/track-info")
 async def get_track_info(url: str):
-    """Получение информации о треке без скачивания"""
     if not url.startswith("https://soundcloud.com"):
         raise HTTPException(status_code=400, detail="Invalid SoundCloud URL")
     
@@ -173,7 +158,6 @@ async def get_track_info(url: str):
 
 @app.get("/stream")
 async def stream_track(url: str):
-    """Потоковая передача трека (скачивание и отправка по частям)"""
     if not url.startswith("https://soundcloud.com"):
         raise HTTPException(status_code=400, detail="Invalid SoundCloud URL")
     
@@ -184,11 +168,9 @@ async def stream_track(url: str):
         if not isinstance(track, Track):
             raise HTTPException(status_code=400, detail="URL is not a valid track")
         
-        # Проверяем, доступен ли трек для скачивания
         if not track.streamable:
             raise HTTPException(status_code=403, detail="Track is not streamable")
         
-        # Создаем безопасное имя файла
         filename = create_safe_filename(track.artist, track.title)
         file_path = TEMP_DIR / f"{track.id}.mp3"
         
@@ -198,12 +180,10 @@ async def stream_track(url: str):
                 with open(file_path, 'wb+') as file:
                     await track.write_mp3_to(file)
                 
-                # Проверяем, что файл действительно создан и не пустой
                 if not file_path.exists() or file_path.stat().st_size == 0:
                     raise Exception("Failed to download track - file is empty")
                     
             except Exception as download_error:
-                # Удаляем пустой или поврежденный файл
                 if file_path.exists():
                     file_path.unlink()
                 logger.error(f"Download failed: {str(download_error)}")
@@ -214,14 +194,12 @@ async def stream_track(url: str):
         else:
             logger.info(f"Using cached file: {file_path}")
         
-        # Создаем генератор для стриминга
         async def iterfile():
             with open(file_path, 'rb') as file:
                 chunk_size = 64 * 1024  # 64KB chunks
                 while chunk := file.read(chunk_size):
                     yield chunk
         
-        # Кодируем имя файла для заголовка (RFC 5987)
         encoded_filename = quote(filename)
         
         logger.info(f"Streaming file: {filename}")
@@ -232,8 +210,10 @@ async def stream_track(url: str):
                 "Content-Disposition": f"inline; filename*=UTF-8''{encoded_filename}",
                 "Accept-Ranges": "bytes",
                 "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Methods": "GET, OPTIONS, HEAD",
                 "Access-Control-Allow-Headers": "*",
+                "Access-Control-Expose-Headers": "*",
+                "Cache-Control": "no-cache",
             }
         )
     
@@ -245,7 +225,6 @@ async def stream_track(url: str):
 
 @app.get("/download")
 async def download_track(url: str):
-    """Скачивание трека как файл"""
     if not url.startswith("https://soundcloud.com"):
         raise HTTPException(status_code=400, detail="Invalid SoundCloud URL")
     
@@ -256,17 +235,14 @@ async def download_track(url: str):
         if not isinstance(track, Track):
             raise HTTPException(status_code=400, detail="URL is not a valid track")
         
-        # Создаем безопасное имя файла
         filename = create_safe_filename(track.artist, track.title)
         file_path = TEMP_DIR / f"{track.id}.mp3"
         
-        # Скачиваем трек, если его еще нет
         if not file_path.exists():
             logger.info(f"Downloading to: {file_path}")
             with open(file_path, 'wb+') as file:
                 await track.write_mp3_to(file)
         
-        # Кодируем имя файла для заголовка (RFC 5987)
         encoded_filename = quote(filename)
         
         logger.info(f"Serving file: {filename}")
@@ -286,7 +262,6 @@ async def download_track(url: str):
 
 @app.get("/playlist")
 async def get_playlist(url: str):
-    """Получение информации о плейлисте"""
     if not url.startswith("https://soundcloud.com"):
         raise HTTPException(status_code=400, detail="Invalid SoundCloud URL")
     
@@ -326,7 +301,6 @@ async def get_playlist(url: str):
 
 @app.delete("/cache/{track_id}")
 async def delete_cache(track_id: int):
-    """Удаление кэшированного трека"""
     file_path = TEMP_DIR / f"{track_id}.mp3"
     
     if file_path.exists():
@@ -338,7 +312,6 @@ async def delete_cache(track_id: int):
 
 @app.delete("/cache")
 async def clear_cache():
-    """Очистка всего кэша"""
     deleted_count = 0
     for file_path in TEMP_DIR.glob("*.mp3"):
         file_path.unlink()
@@ -349,7 +322,6 @@ async def clear_cache():
 
 @app.get("/health")
 async def health_check():
-    """Проверка работоспособности сервера"""
     cache_files = len(list(TEMP_DIR.glob("*.mp3")))
     cache_size = sum(f.stat().st_size for f in TEMP_DIR.glob("*.mp3"))
     

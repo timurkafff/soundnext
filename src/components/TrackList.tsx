@@ -10,6 +10,9 @@ interface TrackListProps {
 }
 
 const formatTime = (seconds: number) => {
+  if (!isFinite(seconds) || isNaN(seconds) || seconds < 0) {
+    return "0:00";
+  }
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   return `${mins}:${secs.toString().padStart(2, "0")}`;
@@ -64,7 +67,6 @@ export default function TrackList({
                 : "bg-black/30 hover:bg-black/50 border border-transparent hover:border-neutral-800"
             }`}
           >
-            {/* Artwork */}
             <div className="shrink-0 relative group">
               {track.artwork_url ? (
                 <>
@@ -91,7 +93,6 @@ export default function TrackList({
               )}
             </div>
 
-            {/* Track Info */}
             <div className="flex-1 min-w-0">
               <h3 className="font-semibold truncate hover:text-neutral-300 transition-colors">
                 {track.title}
@@ -114,7 +115,6 @@ export default function TrackList({
               </div>
             </div>
 
-            {/* Play Indicator - sound waves */}
             {currentTrack?.id === track.id && (
               <div className="shrink-0 flex items-center gap-0.5">
                 {[...Array(3)].map((_, i) => (

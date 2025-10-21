@@ -5,11 +5,13 @@ import { TrackInfo } from "@/types";
 
 interface PlayerProps {
   track: TrackInfo | null;
-  onPlayingChange?: (playing: boolean) => void;
-  onAudioElement?: (element: HTMLAudioElement | null) => void;
 }
 
 const formatTime = (seconds: number) => {
+  // Проверка на валидность числа
+  if (!isFinite(seconds) || isNaN(seconds) || seconds < 0) {
+    return "0:00";
+  }
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   return `${mins}:${secs.toString().padStart(2, "0")}`;
@@ -22,7 +24,7 @@ const formatNumber = (num: number | null) => {
   return num.toString();
 };
 
-export default function Player({ track, onPlayingChange, onAudioElement }: PlayerProps) {
+export default function Player({ track }: PlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -36,16 +38,13 @@ export default function Player({ track, onPlayingChange, onAudioElement }: Playe
       if (isPlaying) {
         audioRef.current.pause();
         setIsPlaying(false);
-        onPlayingChange?.(false);
       } else {
         try {
           await audioRef.current.play();
           setIsPlaying(true);
-          onPlayingChange?.(true);
         } catch (error) {
           console.error("Playback failed:", error);
           setIsPlaying(false);
-          onPlayingChange?.(false);
         }
       }
     }
@@ -58,8 +57,13 @@ export default function Player({ track, onPlayingChange, onAudioElement }: Playe
   };
 
   const handleLoadedMetadata = () => {
-    if (audioRef.current) {
+    if (audioRef.current && isFinite(audioRef.current.duration)) {
       setDuration(audioRef.current.duration);
+    } else {
+      // Fallback на duration из track info (в миллисекундах)
+      if (track && track.duration) {
+        setDuration(track.duration / 1000);
+      }
     }
   };
 
@@ -95,40 +99,34 @@ export default function Player({ track, onPlayingChange, onAudioElement }: Playe
   const handleEnded = () => {
     setIsPlaying(false);
     setCurrentTime(0);
-    onPlayingChange?.(false);
   };
-
-  useEffect(() => {
-    // Передаем аудио элемент родителю
-    if (audioRef.current) {
-      onAudioElement?.(audioRef.current);
-    }
-  }, [onAudioElement]);
 
   useEffect(() => {
     const audio = audioRef.current;
     if (track && audio) {
       setCurrentTime(0);
+      setIsPlaying(false);
+      
+      if (track.duration) {
+        setDuration(track.duration / 1000);
+      }
+      
       audio.load();
       
-      // Автоматически начинаем воспроизведение нового трека
       const playPromise = audio.play();
       
       if (playPromise !== undefined) {
         playPromise
           .then(() => {
             setIsPlaying(true);
-            onPlayingChange?.(true);
           })
           .catch((error) => {
             console.error("Autoplay failed:", error);
             setIsPlaying(false);
-            onPlayingChange?.(false);
           });
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [track]); // Автовоспроизведение при смене трека
+  }, [track]);
 
   if (!track) {
     return (
@@ -151,7 +149,6 @@ export default function Player({ track, onPlayingChange, onAudioElement }: Playe
 
   return (
     <div className="bg-neutral-900/80 backdrop-blur-xl rounded-3xl p-4 shadow-2xl border border-neutral-800 animate-slideUp h-full flex flex-col overflow-y-auto custom-scrollbar">
-      {/* Album Art */}
       <div className="mb-4 relative group shrink-0">
         {track.artwork_url ? (
           <img
@@ -172,7 +169,6 @@ export default function Player({ track, onPlayingChange, onAudioElement }: Playe
         )}
       </div>
 
-      {/* Track Info */}
       <div className="mb-4 shrink-0">
         <h2 className="text-lg font-bold mb-1 line-clamp-2 animate-fadeIn">
           {track.title}
@@ -181,7 +177,6 @@ export default function Player({ track, onPlayingChange, onAudioElement }: Playe
           {track.artist}
         </p>
 
-        {/* Stats */}
         <div className="flex gap-4 text-xs text-neutral-500 animate-fadeIn" style={{ animationDelay: "200ms" }}>
           {track.playback_count !== null && (
             <div className="flex items-center gap-2 hover:text-neutral-300 transition-colors">
@@ -210,20 +205,16 @@ export default function Player({ track, onPlayingChange, onAudioElement }: Playe
         </div>
       </div>
 
-      {/* Player Controls */}
       <div className="mt-auto shrink-0">
-        {/* Progress Bar */}
         <div className="mb-3">
           <div 
             className="relative h-2 bg-neutral-800 rounded-full overflow-visible group cursor-pointer"
             onClick={handleProgressClick}
           >
-            {/* Progress fill */}
             <div
               className="absolute h-full bg-white transition-all rounded-full pointer-events-none"
               style={{ width: `${progress}%`, transitionDuration: isDragging ? '0ms' : '100ms' }}
             />
-            {/* Slider thumb */}
             <div
               className="absolute h-4 w-4 bg-white rounded-full shadow-lg transition-transform -translate-y-1/4 group-hover:scale-125 pointer-events-none"
               style={{ 
@@ -231,7 +222,6 @@ export default function Player({ track, onPlayingChange, onAudioElement }: Playe
                 transitionDuration: isDragging ? '0ms' : '100ms'
               }}
             />
-            {/* Input range */}
             <input
               type="range"
               min="0"
@@ -248,11 +238,10 @@ export default function Player({ track, onPlayingChange, onAudioElement }: Playe
           </div>
           <div className="flex justify-between text-xs text-neutral-500 mt-2">
             <span>{formatTime(currentTime)}</span>
-            <span>{formatTime(duration)}</span>
+            <span>{formatTime(duration > 0 ? duration : (track?.duration || 0) / 1000)}</span>
           </div>
         </div>
 
-        {/* Control Buttons */}
         <div className="flex items-center justify-center gap-4">
           <button
             onClick={playTrack}
@@ -303,13 +292,11 @@ export default function Player({ track, onPlayingChange, onAudioElement }: Playe
         </div>
       </div>
 
-      {/* Hidden Audio Element */}
       <audio
         ref={audioRef}
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={handleEnded}
-        crossOrigin="anonymous"
         src={`${API_URL}/stream?url=${encodeURIComponent(track.url)}`}
       />
     </div>
