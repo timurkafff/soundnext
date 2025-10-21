@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+soundcloud-lib
+aiohttp
+python-multipart
+
