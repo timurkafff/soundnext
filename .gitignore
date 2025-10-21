@@ -25,6 +25,9 @@ backend/venv
 .DS_Store
 *.pem
 
+backend/dist
+backend/build
+
 # debug
 npm-debug.log*
 yarn-debug.log*

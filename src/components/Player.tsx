@@ -5,10 +5,12 @@ import { TrackInfo } from "@/types";
 
 interface PlayerProps {
   track: TrackInfo | null;
+  onToggleLike?: (track: TrackInfo) => void;
+  isLiked?: (trackId: number) => boolean;
+  onPlayingChange?: (isPlaying: boolean) => void;
 }
 
 const formatTime = (seconds: number) => {
-  // Проверка на валидность числа
   if (!isFinite(seconds) || isNaN(seconds) || seconds < 0) {
     return "0:00";
   }
@@ -24,7 +26,7 @@ const formatNumber = (num: number | null) => {
   return num.toString();
 };
 
-export default function Player({ track }: PlayerProps) {
+export default function Player({ track, onToggleLike, isLiked, onPlayingChange }: PlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -38,13 +40,16 @@ export default function Player({ track }: PlayerProps) {
       if (isPlaying) {
         audioRef.current.pause();
         setIsPlaying(false);
+        onPlayingChange?.(false);
       } else {
         try {
           await audioRef.current.play();
           setIsPlaying(true);
+          onPlayingChange?.(true);
         } catch (error) {
           console.error("Playback failed:", error);
           setIsPlaying(false);
+          onPlayingChange?.(false);
         }
       }
     }
@@ -60,7 +65,6 @@ export default function Player({ track }: PlayerProps) {
     if (audioRef.current && isFinite(audioRef.current.duration)) {
       setDuration(audioRef.current.duration);
     } else {
-      // Fallback на duration из track info (в миллисекундах)
       if (track && track.duration) {
         setDuration(track.duration / 1000);
       }
@@ -83,7 +87,6 @@ export default function Player({ track }: PlayerProps) {
     setIsDragging(false);
   };
 
-  // Обработка клика по прогресс-бару
   const handleProgressClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!audioRef.current) return;
     
@@ -98,6 +101,7 @@ export default function Player({ track }: PlayerProps) {
 
   const handleEnded = () => {
     setIsPlaying(false);
+    onPlayingChange?.(false);
     setCurrentTime(0);
   };
 
@@ -106,6 +110,7 @@ export default function Player({ track }: PlayerProps) {
     if (track && audio) {
       setCurrentTime(0);
       setIsPlaying(false);
+      onPlayingChange?.(false);
       
       if (track.duration) {
         setDuration(track.duration / 1000);
@@ -119,14 +124,16 @@ export default function Player({ track }: PlayerProps) {
         playPromise
           .then(() => {
             setIsPlaying(true);
+            onPlayingChange?.(true);
           })
           .catch((error) => {
             console.error("Autoplay failed:", error);
             setIsPlaying(false);
+            onPlayingChange?.(false);
           });
       }
     }
-  }, [track]);
+  }, [track, onPlayingChange]);
 
   if (!track) {
     return (
@@ -243,6 +250,39 @@ export default function Player({ track }: PlayerProps) {
         </div>
 
         <div className="flex items-center justify-center gap-4">
+          {onToggleLike && isLiked && (
+            <button
+              onClick={(e) => {
+                const button = e.currentTarget;
+                const svg = button.querySelector('svg');
+                const wasLiked = isLiked(track.id);
+                
+                if (svg) {
+                  svg.classList.remove('animate-likeHeart', 'animate-unlikeHeart');
+                  setTimeout(() => {
+                    svg.classList.add(wasLiked ? 'animate-unlikeHeart' : 'animate-likeHeart');
+                  }, 10);
+                }
+                
+                onToggleLike(track);
+              }}
+              className="w-14 h-14 flex items-center justify-center bg-neutral-800 hover:bg-neutral-700 rounded-full hover:scale-110 active:scale-95 transition-all duration-300"
+            >
+              <svg
+                className={`w-7 h-7 transition-colors duration-200 ${
+                  isLiked(track.id)
+                    ? "fill-red-500 text-red-500"
+                    : "fill-none text-white"
+                }`}
+                stroke="currentColor"
+                strokeWidth="2"
+                viewBox="0 0 24 24"
+              >
+                <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
+              </svg>
+            </button>
+          )}
+
           <button
             onClick={playTrack}
             className="w-14 h-14 flex items-center justify-center bg-white text-black rounded-full hover:scale-110 active:scale-95 transition-all duration-300 shadow-lg hover:shadow-white/20"
@@ -272,7 +312,7 @@ export default function Player({ track }: PlayerProps) {
 
           <a
             href={`${API_URL}/download?url=${encodeURIComponent(track.url)}`}
-            className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 rounded-2xl transition-all duration-300 flex items-center gap-2 hover:scale-105 active:scale-95 text-sm"
+            className="px-5 py-5 bg-neutral-800 hover:bg-neutral-700 rounded-full transition-all duration-300 flex items-center gap-2 hover:scale-105 active:scale-95 text-sm"
           >
             <svg
               className="w-5 h-5"
@@ -287,7 +327,6 @@ export default function Player({ track }: PlayerProps) {
                 d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
               />
             </svg>
-            Download
           </a>
         </div>
       </div>

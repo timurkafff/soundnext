@@ -7,6 +7,9 @@ interface TrackListProps {
   currentTrack: TrackInfo | null;
   onSelectTrack: (track: TrackInfo) => void;
   loading: boolean;
+  onToggleLike?: (track: TrackInfo) => void;
+  isLiked?: (trackId: number) => boolean;
+  isPlaying?: boolean;
 }
 
 const formatTime = (seconds: number) => {
@@ -30,6 +33,9 @@ export default function TrackList({
   currentTrack,
   onSelectTrack,
   loading,
+  onToggleLike,
+  isLiked,
+  isPlaying,
 }: TrackListProps) {
   if (loading) return null;
 
@@ -115,7 +121,41 @@ export default function TrackList({
               </div>
             </div>
 
-            {currentTrack?.id === track.id && (
+            {onToggleLike && isLiked && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const button = e.currentTarget;
+                  const svg = button.querySelector('svg');
+                  const wasLiked = isLiked(track.id);
+                  
+                  if (svg) {
+                    svg.classList.remove('animate-likeHeart', 'animate-unlikeHeart');
+                    setTimeout(() => {
+                      svg.classList.add(wasLiked ? 'animate-unlikeHeart' : 'animate-likeHeart');
+                    }, 10);
+                  }
+                  
+                  onToggleLike(track);
+                }}
+                className="shrink-0 p-2 hover:scale-110 transition-transform"
+              >
+                <svg
+                  className={`w-5 h-5 transition-colors duration-200 ${
+                    isLiked(track.id)
+                      ? "fill-red-500 text-red-500"
+                      : "fill-none text-neutral-500"
+                  }`}
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  viewBox="0 0 24 24"
+                >
+                  <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
+                </svg>
+              </button>
+            )}
+
+            {currentTrack?.id === track.id && isPlaying && (
               <div className="shrink-0 flex items-center gap-0.5">
                 {[...Array(3)].map((_, i) => (
                   <div
