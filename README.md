@@ -221,7 +221,7 @@ Health check endpoint with cache statistics
 ### Metadata Embedding
 All downloaded tracks include:
 - Album artist
-- Track title
+- Track title  
 - Album artwork (high quality)
 - Duration
 - Proper ID3 tags
@@ -398,7 +398,6 @@ open backend/dist/SoundNext.app
 
 #### Technical Improvements
 - [ ] HLS streaming support
-- [ ] Offline mode
 - [ ] Auto-updates for desktop app
 - [ ] Database for metadata
 - [ ] GraphQL API
