@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect } from "react";
 import Link from "next/link";
 import SearchBar from "@/components/SearchBar";
 import TrackList from "@/components/TrackList";
-import Player from "@/components/Player";
+import PlayerUI from "@/components/PlayerUI";
 import { useLikes } from "@/hooks/useLikes";
 import { useSearch } from "@/hooks/useSearch";
+import { usePlayer } from "@/contexts/PlayerContext";
 import { TrackInfo } from "@/types";
 
 export default function Profile() {
@@ -19,14 +20,17 @@ export default function Profile() {
     error,
     searchTracks,
   } = useSearch();
-  const [currentTrack, setCurrentTrack] = useState<TrackInfo | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const { currentTrack, isPlaying, setCurrentTrack, setPlaylist } = usePlayer();
 
   const handleSelectTrack = (track: TrackInfo) => {
     setCurrentTrack(track);
   };
 
   const displayTracks = searchQuery.trim() ? searchResults : likedTracks;
+
+  useEffect(() => {
+    setPlaylist(displayTracks);
+  }, [searchResults, likedTracks, searchQuery, setPlaylist]);
 
   return (
     <main className="h-screen bg-black text-white overflow-hidden flex flex-col">
@@ -51,9 +55,14 @@ export default function Profile() {
             </svg>
           </Link>
 
-          <h1 className="text-5xl font-bold mb-2 tracking-tight">
-            Liked <span className="text-neutral-500">Tracks</span>
-          </h1>
+          <div className="flex items-center gap-4">
+            <h1 className="text-5xl font-bold mb-2 tracking-tight">
+              Liked <span className="text-neutral-500">Tracks</span>
+            </h1>
+            <div className="px-4 py-2 bg-red-500/20 rounded-full mb-2">
+              <span className="text-2xl font-bold text-red-500">{likedTracks.length}</span>
+            </div>
+          </div>
 
           <div className="w-32" />
         </div>
@@ -103,11 +112,9 @@ export default function Profile() {
             </div>
 
             <div className="lg:col-span-1 overflow-hidden">
-              <Player
-                track={currentTrack}
-                onToggleLike={currentTrack ? toggleLike : undefined}
-                isLiked={currentTrack ? isLiked : undefined}
-                onPlayingChange={setIsPlaying}
+              <PlayerUI
+                onToggleLike={toggleLike}
+                isLiked={isLiked}
               />
             </div>
           </div>

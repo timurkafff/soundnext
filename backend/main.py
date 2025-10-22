@@ -1,6 +1,7 @@
 import asyncio
 import os
 import tempfile
+import json
 from pathlib import Path
 from typing import Optional, List
 from urllib.parse import quote
@@ -45,6 +46,10 @@ api = SoundcloudAPI()
 TEMP_DIR = Path(tempfile.gettempdir()) / "soundcloud_downloads"
 TEMP_DIR.mkdir(exist_ok=True)
 
+DATA_DIR = Path.home() / ".soundnext"
+DATA_DIR.mkdir(exist_ok=True)
+LIKES_FILE = DATA_DIR / "liked_tracks.json"
+
 class TrackInfo(BaseModel):
     url: str
     artist: str
@@ -68,7 +73,13 @@ async def root():
             "search": "/search?q=track_name",
             "track_info": "/track-info?url=soundcloud_url",
             "stream": "/stream?url=soundcloud_url",
-            "download": "/download?url=soundcloud_url"
+            "download": "/download?url=soundcloud_url",
+            "likes": {
+                "get_all": "GET /likes",
+                "add": "POST /likes",
+                "remove": "DELETE /likes/{track_id}",
+                "sync": "PUT /likes"
+            }
         }
     }
 
@@ -163,6 +174,42 @@ async def stream_track(url: str):
     
     try:
         logger.info(f"Streaming: {url}")
+        
+        liked_tracks = load_likes()
+        cached_track = None
+        
+        for track_info in liked_tracks:
+            if track_info.url == url:
+                file_path = TEMP_DIR / f"{track_info.id}.mp3"
+                if file_path.exists() and file_path.stat().st_size > 0:
+                    cached_track = track_info
+                    logger.info(f"Fast streaming from cache: {cached_track.artist} - {cached_track.title}")
+                    
+                    filename = create_safe_filename(cached_track.artist, cached_track.title)
+                    
+                    async def iterfile():
+                        with open(file_path, 'rb') as file:
+                            chunk_size = 64 * 1024
+                            while chunk := file.read(chunk_size):
+                                yield chunk
+                    
+                    encoded_filename = quote(filename)
+                    
+                    return StreamingResponse(
+                        iterfile(),
+                        media_type="audio/mpeg",
+                        headers={
+                            "Content-Disposition": f"inline; filename*=UTF-8''{encoded_filename}",
+                            "Accept-Ranges": "bytes",
+                            "Access-Control-Allow-Origin": "*",
+                            "Access-Control-Allow-Methods": "GET, OPTIONS, HEAD",
+                            "Access-Control-Allow-Headers": "*",
+                            "Access-Control-Expose-Headers": "*",
+                            "Cache-Control": "no-cache",
+                        }
+                    )
+                break
+        
         track = await api.resolve(url)
         
         if not isinstance(track, Track):
@@ -196,7 +243,7 @@ async def stream_track(url: str):
         
         async def iterfile():
             with open(file_path, 'rb') as file:
-                chunk_size = 64 * 1024  # 64KB chunks
+                chunk_size = 64 * 1024
                 while chunk := file.read(chunk_size):
                     yield chunk
         
@@ -331,6 +378,131 @@ async def health_check():
         "cache_files": cache_files,
         "cache_size_mb": round(cache_size / (1024 * 1024), 2)
     }
+
+async def cache_liked_track(track: TrackInfo):
+    try:
+        file_path = TEMP_DIR / f"{track.id}.mp3"
+        
+        if file_path.exists():
+            logger.info(f"Track already cached: {track.artist} - {track.title}")
+            return
+        
+        logger.info(f"Caching liked track: {track.artist} - {track.title}")
+        
+        resolved_track = await api.resolve(track.url)
+        
+        if not isinstance(resolved_track, Track):
+            logger.error(f"Could not resolve track: {track.url}")
+            return
+        
+        if not resolved_track.streamable:
+            logger.warning(f"Track is not streamable: {track.artist} - {track.title}")
+            return
+        
+        with open(file_path, 'wb+') as file:
+            await resolved_track.write_mp3_to(file)
+        
+        logger.info(f"Successfully cached: {track.artist} - {track.title}")
+    except Exception as e:
+        logger.error(f"Error caching track {track.artist} - {track.title}: {e}")
+
+def load_likes() -> List[TrackInfo]:
+    if LIKES_FILE.exists():
+        try:
+            with open(LIKES_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return [TrackInfo(**track) for track in data]
+        except Exception as e:
+            logger.error(f"Error loading likes: {e}")
+            return []
+    return []
+
+def save_likes(tracks: List[TrackInfo]):
+    try:
+        with open(LIKES_FILE, 'w', encoding='utf-8') as f:
+            tracks_data = []
+            for track in tracks:
+                if hasattr(track, 'model_dump'):
+                    tracks_data.append(track.model_dump())
+                else:
+                    tracks_data.append(track.dict())
+            json.dump(tracks_data, f, ensure_ascii=False, indent=2)
+        logger.info(f"Saved {len(tracks)} liked tracks")
+    except Exception as e:
+        logger.error(f"Error saving likes: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save likes: {str(e)}")
+
+@app.get("/likes", response_model=List[TrackInfo])
+async def get_likes():
+    try:
+        likes = load_likes()
+        logger.info(f"Retrieved {len(likes)} liked tracks")
+        return likes
+    except Exception as e:
+        logger.error(f"Error getting likes: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get likes: {str(e)}")
+
+@app.post("/likes")
+async def add_like(track: TrackInfo):
+    try:
+        likes = load_likes()
+        
+        if any(t.id == track.id for t in likes):
+            return {"message": "Track already liked", "count": len(likes)}
+        
+        likes.append(track)
+        save_likes(likes)
+        
+        asyncio.create_task(cache_liked_track(track))
+        
+        logger.info(f"Added like: {track.artist} - {track.title}")
+        return {"message": "Track liked", "count": len(likes)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adding like: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to add like: {str(e)}")
+
+@app.delete("/likes/{track_id}")
+async def remove_like(track_id: int):
+    try:
+        likes = load_likes()
+        original_count = len(likes)
+        
+        likes = [t for t in likes if t.id != track_id]
+        
+        if len(likes) == original_count:
+            raise HTTPException(status_code=404, detail="Track not found in likes")
+        
+        save_likes(likes)
+        
+        file_path = TEMP_DIR / f"{track_id}.mp3"
+        if file_path.exists():
+            try:
+                file_path.unlink()
+                logger.info(f"Removed cached file for unliked track: {track_id}")
+            except Exception as e:
+                logger.warning(f"Failed to remove cached file: {e}")
+        
+        logger.info(f"Removed like for track ID: {track_id}")
+        return {"message": "Track unliked", "count": len(likes)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error removing like: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to remove like: {str(e)}")
+
+@app.put("/likes")
+async def sync_likes(tracks: List[TrackInfo]):
+    try:
+        save_likes(tracks)
+        logger.info(f"Synced {len(tracks)} liked tracks")
+        return {"message": "Likes synced", "count": len(tracks)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error syncing likes: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to sync likes: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

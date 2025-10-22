@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect } from "react";
 import Link from "next/link";
 import SearchBar from "@/components/SearchBar";
 import TrackList from "@/components/TrackList";
-import Player from "@/components/Player";
+import PlayerUI from "@/components/PlayerUI";
 import { useSearch } from "@/hooks/useSearch";
 import { useLikes } from "@/hooks/useLikes";
+import { usePlayer } from "@/contexts/PlayerContext";
 import { TrackInfo } from "@/types";
 
 export default function Home() {
@@ -20,8 +21,11 @@ export default function Home() {
   } = useSearch();
 
   const { toggleLike, isLiked } = useLikes();
-  const [currentTrack, setCurrentTrack] = useState<TrackInfo | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const { currentTrack, isPlaying, setCurrentTrack, setPlaylist } = usePlayer();
+
+  useEffect(() => {
+    setPlaylist(searchResults);
+  }, [searchResults, setPlaylist]);
 
   const handleSelectTrack = (track: TrackInfo) => {
     setCurrentTrack(track);
@@ -35,7 +39,7 @@ export default function Home() {
           <h1 className="text-5xl font-bold mb-2 tracking-tight">
             Sound<span className="text-neutral-500">Next</span>
           </h1>
-          <div className="flex-1 flex justify-end">
+          <div className="flex-1 flex justify-end gap-3">
             <Link
               href="/profile"
               className="px-4 py-3 bg-neutral-800 hover:bg-neutral-700 rounded-2xl transition-all duration-300 flex items-center gap-2 hover:scale-105 active:scale-95"
@@ -75,11 +79,9 @@ export default function Home() {
           </div>
 
           <div className="lg:col-span-1 overflow-hidden">
-            <Player
-              track={currentTrack}
-              onToggleLike={currentTrack ? toggleLike : undefined}
-              isLiked={currentTrack ? isLiked : undefined}
-              onPlayingChange={setIsPlaying}
+            <PlayerUI
+              onToggleLike={toggleLike}
+              isLiked={isLiked}
             />
           </div>
         </div>

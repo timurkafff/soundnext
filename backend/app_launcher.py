@@ -87,7 +87,7 @@ def create_window():
         title="SoundNext - Music Player",
         url=url,
         width=1200,
-        height=850,
+        height=900,
         resizable=False,
         frameless=False,
         easy_drag=True,
@@ -109,7 +109,56 @@ def on_closing():
         if backend_process.is_alive():
             backend_process.kill()
     
+    clear_cache()
+    
     logger.info("Application closed")
+
+
+def clear_cache():
+    import tempfile
+    import json
+    
+    cache_dir = Path(tempfile.gettempdir()) / "soundcloud_downloads"
+    
+    if cache_dir.exists():
+        try:
+            liked_track_ids = set()
+            
+            likes_file = Path.home() / ".soundnext" / "liked_tracks.json"
+            
+            if likes_file.exists():
+                try:
+                    with open(likes_file, 'r', encoding='utf-8') as f:
+                        liked_tracks = json.load(f)
+                        liked_track_ids = {track['id'] for track in liked_tracks}
+                        logger.info(f"Preserving {len(liked_track_ids)} liked tracks in cache")
+                except Exception as e:
+                    logger.warning(f"Could not read liked tracks file: {e}")
+            else:
+                logger.info("No liked tracks found, clearing all cache")
+            
+            deleted_count = 0
+            preserved_count = 0
+            
+            for file_path in cache_dir.glob("*.mp3"):
+                try:
+                    track_id = int(file_path.stem)
+                    
+                    if track_id in liked_track_ids:
+                        preserved_count += 1
+                        logger.debug(f"Preserving liked track: {track_id}")
+                    else:
+                        file_path.unlink()
+                        deleted_count += 1
+                except ValueError:
+                    file_path.unlink()
+                    deleted_count += 1
+                except Exception as e:
+                    logger.warning(f"Failed to process {file_path}: {e}")
+            
+            logger.info(f"Cache cleared: {deleted_count} files deleted, {preserved_count} liked tracks preserved")
+        except Exception as e:
+            logger.error(f"Error clearing cache: {e}")
 
 
 class Api:
@@ -137,7 +186,7 @@ def main():
         api = Api()
         window = create_window()
         
-        webview.start(debug=True)
+        webview.start(debug=False)
         
     except Exception as e:
         logger.error(f"Application error: {e}", exc_info=True)
