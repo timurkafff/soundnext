@@ -51,6 +51,10 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+icon_path = BACKEND_DIR / 'icons' / 'windows.ico'
+if not icon_path.exists():
+    icon_path = None
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -67,7 +71,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # Add path to .ico file if you have one
+    icon=str(icon_path) if icon_path else None,
 )
 
 coll = COLLECT(

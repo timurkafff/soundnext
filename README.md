@@ -1,5 +1,9 @@
 # SoundNext 🎵
 
+<p align="center">
+  <img src="./img/icons.png" alt="SoundNext Icon" width="128" height="128">
+</p>
+
 A modern desktop and web application for streaming and downloading music from SoundCloud, built with Next.js, FastAPI, and PyWebView.
 
 <img src="./img/img.png">

@@ -80,10 +80,14 @@ coll = COLLECT(
     name='SoundNext',
 )
 
+icon_path = BACKEND_DIR / 'icons' / 'mac.icns'
+if not icon_path.exists():
+    icon_path = None
+
 app = BUNDLE(
     coll,
     name='SoundNext.app',
-    icon=None,  # Можно добавить путь к .icns файлу
+    icon=str(icon_path) if icon_path else None,
     bundle_identifier='com.soundnext.app',
     info_plist={
         'NSPrincipalClass': 'NSApplication',
