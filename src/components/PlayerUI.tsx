@@ -252,8 +252,24 @@ export default function PlayerUI({ onToggleLike, isLiked }: PlayerUIProps) {
             )}
           </button>
 
-          <a
-            href={`${API_URL}/download?url=${encodeURIComponent(track.url)}`}
+          <button
+            onClick={async () => {
+              try {
+                const response = await fetch(`${API_URL}/download?url=${encodeURIComponent(track.url)}`);
+                if (!response.ok) throw new Error('Download failed');
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${track.artist} - ${track.title}.mp3`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+              } catch (error) {
+                console.error('Download error:', error);
+              }
+            }}
             className="px-5 py-5 bg-neutral-800 hover:bg-neutral-700 rounded-full transition-all duration-300 flex items-center gap-2 hover:scale-105 active:scale-95 text-sm"
           >
             <svg
@@ -269,7 +285,7 @@ export default function PlayerUI({ onToggleLike, isLiked }: PlayerUIProps) {
                 d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
               />
             </svg>
-          </a>
+          </button>
         </div>
       </div>
     </div>

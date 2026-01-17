@@ -2,6 +2,7 @@ import asyncio
 import os
 import tempfile
 import json
+import re
 from pathlib import Path
 from typing import Optional, List
 from urllib.parse import quote
@@ -18,6 +19,48 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="SoundCloud Music Server", version="1.0.0")
+
+# Глобальная переменная для кэширования client_id
+_cached_client_id = None
+
+# Кастомная функция получения client_id
+async def get_client_id() -> str:
+    """Получает client_id напрямую с SoundCloud"""
+    global _cached_client_id
+    
+    if _cached_client_id:
+        return _cached_client_id
+    
+    async with aiohttp.ClientSession() as session:
+        # Получаем главную страницу
+        async with session.get("https://soundcloud.com") as resp:
+            html = await resp.text()
+        
+        # Ищем ссылки на скрипты
+        script_urls = re.findall(r'src="(https://a-v2\.sndcdn\.com/assets/[^"]+\.js)"', html)
+        
+        for script_url in script_urls:
+            try:
+                async with session.get(script_url) as resp:
+                    js_content = await resp.text()
+                
+                # Ищем client_id - должен быть ровно 32 символа
+                matches = re.findall(r'client_id["\s:=]+["\']([a-zA-Z0-9]{32})["\']', js_content)
+                
+                for client_id in matches:
+                    if len(client_id) == 32 and client_id.isalnum():
+                        # Проверяем, что это настоящий client_id (не содержит только буквы)
+                        has_digit = any(c.isdigit() for c in client_id)
+                        has_letter = any(c.isalpha() for c in client_id)
+                        if has_digit and has_letter:
+                            logger.info(f"Found client_id: {client_id[:8]}...")
+                            _cached_client_id = client_id
+                            return client_id
+            except Exception as e:
+                logger.warning(f"Failed to fetch script {script_url}: {e}")
+                continue
+    
+    raise Exception("Could not find client_id")
 
 def create_safe_filename(artist: str, title: str) -> str:
     artist = artist or 'Unknown'
@@ -85,16 +128,25 @@ async def root():
 
 @app.get("/search", response_model=SearchResult)
 async def search_tracks(q: str, limit: int = 20):
+    global _cached_client_id
+    
     if not q or len(q.strip()) < 2:
         raise HTTPException(status_code=400, detail="Query must be at least 2 characters")
     
     try:
         logger.info(f"Searching for: {q}")
         
+        # Получаем client_id
         if not api.client_id:
-            await api.get_credentials()
+            try:
+                await api.get_credentials()
+            except:
+                pass
         
-        search_url = f"https://api-v2.soundcloud.com/search/tracks"
+        if not api.client_id:
+            api.client_id = await get_client_id()
+        
+        search_url = "https://api-v2.soundcloud.com/search/tracks"
         params = {
             "q": q,
             "client_id": api.client_id,
@@ -104,10 +156,20 @@ async def search_tracks(q: str, limit: int = 20):
         
         async with aiohttp.ClientSession() as session:
             async with session.get(search_url, params=params) as response:
-                if response.status != 200:
+                # Если 401 - сбрасываем кэш и получаем новый client_id
+                if response.status == 401:
+                    logger.warning("Client ID expired, fetching new one...")
+                    _cached_client_id = None
+                    api.client_id = await get_client_id()
+                    params["client_id"] = api.client_id
+                    async with session.get(search_url, params=params) as retry_response:
+                        if retry_response.status != 200:
+                            raise HTTPException(status_code=retry_response.status, detail="Failed to search tracks")
+                        data = await retry_response.json()
+                elif response.status != 200:
                     raise HTTPException(status_code=response.status, detail="Failed to search tracks")
-                
-                data = await response.json()
+                else:
+                    data = await response.json()
                 
                 tracks = []
                 for item in data.get("collection", []):
@@ -167,13 +229,18 @@ async def get_track_info(url: str):
         logger.error(f"Info error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get track info: {str(e)}")
 
+from fastapi import Request
+
 @app.get("/stream")
-async def stream_track(url: str):
+async def stream_track(url: str, request: Request):
     if not url.startswith("https://soundcloud.com"):
         raise HTTPException(status_code=400, detail="Invalid SoundCloud URL")
     
     try:
         logger.info(f"Streaming: {url}")
+        
+        # Получаем Range header для перемотки
+        range_header = request.headers.get("range")
         
         liked_tracks = load_likes()
         cached_track = None
@@ -184,30 +251,8 @@ async def stream_track(url: str):
                 if file_path.exists() and file_path.stat().st_size > 0:
                     cached_track = track_info
                     logger.info(f"Fast streaming from cache: {cached_track.artist} - {cached_track.title}")
-                    
                     filename = create_safe_filename(cached_track.artist, cached_track.title)
-                    
-                    async def iterfile():
-                        with open(file_path, 'rb') as file:
-                            chunk_size = 64 * 1024
-                            while chunk := file.read(chunk_size):
-                                yield chunk
-                    
-                    encoded_filename = quote(filename)
-                    
-                    return StreamingResponse(
-                        iterfile(),
-                        media_type="audio/mpeg",
-                        headers={
-                            "Content-Disposition": f"inline; filename*=UTF-8''{encoded_filename}",
-                            "Accept-Ranges": "bytes",
-                            "Access-Control-Allow-Origin": "*",
-                            "Access-Control-Allow-Methods": "GET, OPTIONS, HEAD",
-                            "Access-Control-Allow-Headers": "*",
-                            "Access-Control-Expose-Headers": "*",
-                            "Cache-Control": "no-cache",
-                        }
-                    )
+                    return await serve_file_with_range(file_path, filename, range_header)
                 break
         
         track = await api.resolve(url)
@@ -241,34 +286,80 @@ async def stream_track(url: str):
         else:
             logger.info(f"Using cached file: {file_path}")
         
-        async def iterfile():
-            with open(file_path, 'rb') as file:
-                chunk_size = 64 * 1024
-                while chunk := file.read(chunk_size):
-                    yield chunk
-        
-        encoded_filename = quote(filename)
-        
         logger.info(f"Streaming file: {filename}")
-        return StreamingResponse(
-            iterfile(),
-            media_type="audio/mpeg",
-            headers={
-                "Content-Disposition": f"inline; filename*=UTF-8''{encoded_filename}",
-                "Accept-Ranges": "bytes",
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "GET, OPTIONS, HEAD",
-                "Access-Control-Allow-Headers": "*",
-                "Access-Control-Expose-Headers": "*",
-                "Cache-Control": "no-cache",
-            }
-        )
+        return await serve_file_with_range(file_path, filename, range_header)
     
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Stream error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Streaming failed: {str(e)}")
+
+async def serve_file_with_range(file_path: Path, filename: str, range_header: str = None):
+    """Отдаёт файл с поддержкой Range requests для перемотки"""
+    file_size = file_path.stat().st_size
+    encoded_filename = quote(filename)
+    
+    headers = {
+        "Content-Disposition": f"inline; filename*=UTF-8''{encoded_filename}",
+        "Accept-Ranges": "bytes",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS, HEAD",
+        "Access-Control-Allow-Headers": "*",
+        "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
+        "Cache-Control": "no-cache",
+    }
+    
+    if range_header:
+        # Парсим Range header: "bytes=start-end"
+        range_match = re.match(r'bytes=(\d+)-(\d*)', range_header)
+        if range_match:
+            start = int(range_match.group(1))
+            end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+            
+            if start >= file_size:
+                raise HTTPException(status_code=416, detail="Range not satisfiable")
+            
+            end = min(end, file_size - 1)
+            content_length = end - start + 1
+            
+            async def iterfile_range():
+                with open(file_path, 'rb') as file:
+                    file.seek(start)
+                    remaining = content_length
+                    chunk_size = 64 * 1024
+                    while remaining > 0:
+                        read_size = min(chunk_size, remaining)
+                        chunk = file.read(read_size)
+                        if not chunk:
+                            break
+                        remaining -= len(chunk)
+                        yield chunk
+            
+            headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+            headers["Content-Length"] = str(content_length)
+            
+            return StreamingResponse(
+                iterfile_range(),
+                status_code=206,
+                media_type="audio/mpeg",
+                headers=headers
+            )
+    
+    # Обычный запрос без Range
+    async def iterfile():
+        with open(file_path, 'rb') as file:
+            chunk_size = 64 * 1024
+            while chunk := file.read(chunk_size):
+                yield chunk
+    
+    headers["Content-Length"] = str(file_size)
+    
+    return StreamingResponse(
+        iterfile(),
+        media_type="audio/mpeg",
+        headers=headers
+    )
 
 @app.get("/download")
 async def download_track(url: str):
