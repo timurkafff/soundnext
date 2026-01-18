@@ -26,9 +26,10 @@ const formatNumber = (num: number | null) => {
 };
 
 export default function PlayerUI({ onToggleLike, isLiked }: PlayerUIProps) {
-  const { currentTrack: track, isPlaying, currentTime, duration, setIsPlaying, audioRef } = usePlayer();
+  const { currentTrack: track, isPlaying, currentTime, duration, setIsPlaying, audioRef, nextTrack, previousTrack } = usePlayer();
   const [isDragging, setIsDragging] = useState(false);
   const [seekTime, setSeekTime] = useState(0);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   const API_URL = "http://localhost:8000";
 
@@ -49,19 +50,21 @@ export default function PlayerUI({ onToggleLike, isLiked }: PlayerUIProps) {
     }
   };
 
-  const handleSeekStart = () => {
+  const handleSeekStart = (e: React.MouseEvent<HTMLInputElement> | React.TouchEvent<HTMLInputElement>) => {
     setIsDragging(true);
+    setSeekTime(currentTime);
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value);
     setSeekTime(time);
+    // Сразу устанавливаем время аудио для мгновенного отклика
+    if (audioRef?.current) {
+      audioRef.current.currentTime = time;
+    }
   };
 
   const handleSeekEnd = () => {
-    if (audioRef?.current) {
-      audioRef.current.currentTime = seekTime;
-    }
     setIsDragging(false);
   };
 
@@ -76,18 +79,44 @@ export default function PlayerUI({ onToggleLike, isLiked }: PlayerUIProps) {
     audioRef.current.currentTime = newTime;
   };
 
+  const handleDownload = async () => {
+    if (!track || isDownloading) return;
+    
+    setIsDownloading(true);
+    try {
+      const response = await fetch(`${API_URL}/download?url=${encodeURIComponent(track.url)}`);
+      if (!response.ok) throw new Error('Download failed');
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${track.artist} - ${track.title}.mp3`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Download error:', error);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   if (!track) {
     return (
-      <div className="bg-neutral-900/80 backdrop-blur-xl rounded-3xl p-4 shadow-2xl border border-neutral-800 animate-fadeIn h-full flex items-center justify-center">
-        <div className="text-center text-neutral-500">
-          <svg
-            className="w-16 h-16 mx-auto mb-4 text-neutral-700 animate-pulse"
-            fill="currentColor"
-            viewBox="0 0 20 20"
-          >
-            <path d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" />
-          </svg>
-          <p>Select a track to play</p>
+      <div className="glass rounded-3xl p-6 shadow-2xl h-full flex items-center justify-center">
+        <div className="text-center text-neutral-500 animate-fadeIn">
+          <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-neutral-800/50 flex items-center justify-center animate-pulse">
+            <svg
+              className="w-10 h-10 text-neutral-600"
+              fill="currentColor"
+              viewBox="0 0 20 20"
+            >
+              <path d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" />
+            </svg>
+          </div>
+          <p className="font-medium mb-1">No track selected</p>
+          <p className="text-sm text-neutral-600">Choose a track to start playing</p>
         </div>
       </div>
     );
@@ -97,39 +126,50 @@ export default function PlayerUI({ onToggleLike, isLiked }: PlayerUIProps) {
   const progress = duration > 0 ? (displayTime / duration) * 100 : 0;
 
   return (
-    <div className="bg-neutral-900/80 backdrop-blur-xl rounded-3xl p-4 shadow-2xl border border-neutral-800 animate-slideUp h-full flex flex-col overflow-y-auto custom-scrollbar">
-      <div className="mb-4 relative group shrink-0">
-        {track.artwork_url ? (
-          <img
-            src={track.artwork_url.replace("-large", "-t500x500")}
-            alt={track.title}
-            className="w-full aspect-square rounded-2xl shadow-2xl object-cover transition-transform duration-500"
-          />
-        ) : (
-          <div className="w-full aspect-square rounded-2xl bg-neutral-800 flex items-center justify-center">
-            <svg
-              className="w-20 h-20 text-neutral-600"
-              fill="currentColor"
-              viewBox="0 0 20 20"
-            >
-              <path d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" />
-            </svg>
-          </div>
-        )}
+    <div className="glass rounded-3xl p-5 shadow-2xl h-full flex flex-col overflow-y-auto custom-scrollbar">
+      {/* Album Art */}
+      <div className="mb-5 relative group shrink-0">
+        <div className={`relative overflow-hidden rounded-2xl ${isPlaying ? 'animate-pulse-glow' : ''}`}>
+          {track.artwork_url ? (
+            <img
+              src={track.artwork_url.replace("-large", "-t500x500")}
+              alt={track.title}
+              className={`w-full aspect-square rounded-2xl object-cover transition-all duration-700 ${
+                isPlaying ? 'scale-100' : 'scale-[0.98]'
+              }`}
+            />
+          ) : (
+            <div className="w-full aspect-square rounded-2xl bg-gradient-to-br from-neutral-800 to-neutral-900 flex items-center justify-center">
+              <svg
+                className="w-20 h-20 text-neutral-700"
+                fill="currentColor"
+                viewBox="0 0 20 20"
+              >
+                <path d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" />
+              </svg>
+            </div>
+          )}
+          
+          {/* Playing indicator overlay */}
+          {isPlaying && (
+            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent rounded-2xl" />
+          )}
+        </div>
       </div>
 
-      <div className="mb-4 shrink-0">
+      {/* Track Info */}
+      <div className="mb-5 shrink-0 text-center">
         <h2 className="text-lg font-bold mb-1 line-clamp-2 animate-fadeIn">
           {track.title}
         </h2>
-        <p className="text-neutral-400 mb-3 text-sm animate-fadeIn" style={{ animationDelay: "100ms" }}>
+        <p className="text-neutral-400 text-sm animate-fadeIn stagger-1">
           {track.artist}
         </p>
 
-        <div className="flex gap-4 text-xs text-neutral-500 animate-fadeIn" style={{ animationDelay: "200ms" }}>
+        <div className="flex justify-center gap-4 text-xs text-neutral-500 mt-3 animate-fadeIn stagger-2">
           {track.playback_count !== null && (
-            <div className="flex items-center gap-2 hover:text-neutral-300 transition-colors">
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-neutral-800/50">
+              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
                 <path
                   fillRule="evenodd"
                   d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
@@ -140,8 +180,8 @@ export default function PlayerUI({ onToggleLike, isLiked }: PlayerUIProps) {
             </div>
           )}
           {track.likes_count !== null && (
-            <div className="flex items-center gap-2 hover:text-neutral-300 transition-colors">
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-neutral-800/50">
+              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
                 <path
                   fillRule="evenodd"
                   d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z"
@@ -154,18 +194,21 @@ export default function PlayerUI({ onToggleLike, isLiked }: PlayerUIProps) {
         </div>
       </div>
 
+      {/* Progress Bar */}
       <div className="mt-auto shrink-0">
-        <div className="mb-3">
+        <div className="mb-4">
           <div
-            className="relative h-2 bg-neutral-800 rounded-full overflow-visible group cursor-pointer"
+            className="progress-track relative h-1.5 bg-neutral-800 rounded-full overflow-visible group cursor-pointer"
             onClick={handleProgressClick}
           >
+            {/* Progress fill */}
             <div
-              className="absolute h-full bg-white transition-all rounded-full pointer-events-none"
+              className="absolute h-full bg-white rounded-full pointer-events-none"
               style={{ width: `${progress}%`, transitionDuration: isDragging ? '0ms' : '100ms' }}
             />
+            {/* Thumb */}
             <div
-              className="absolute h-4 w-4 bg-white rounded-full shadow-lg transition-transform -translate-y-1/4 group-hover:scale-125 pointer-events-none"
+              className="progress-thumb absolute h-4 w-4 bg-white rounded-full shadow-lg -translate-y-1/3 opacity-0 group-hover:opacity-100 pointer-events-none"
               style={{
                 left: `calc(${progress}% - 8px)`,
                 transitionDuration: isDragging ? '0ms' : '100ms'
@@ -182,16 +225,18 @@ export default function PlayerUI({ onToggleLike, isLiked }: PlayerUIProps) {
               onChange={handleSeek}
               onMouseUp={handleSeekEnd}
               onTouchEnd={handleSeekEnd}
-              className="absolute inset-0 w-full h-2 opacity-0 cursor-pointer z-10"
+              className="absolute inset-0 w-full h-4 -top-1 opacity-0 cursor-pointer z-10"
             />
           </div>
-          <div className="flex justify-between text-xs text-neutral-500 mt-2">
+          <div className="flex justify-between text-xs text-neutral-500 mt-2 font-mono">
             <span>{formatTime(displayTime)}</span>
             <span>{formatTime(duration > 0 ? duration : (track?.duration || 0) / 1000)}</span>
           </div>
         </div>
 
-        <div className="flex items-center justify-center gap-4">
+        {/* Controls */}
+        <div className="flex items-center justify-center gap-3">
+          {/* Like Button */}
           {onToggleLike && isLiked && (
             <button
               onClick={(e) => {
@@ -208,12 +253,12 @@ export default function PlayerUI({ onToggleLike, isLiked }: PlayerUIProps) {
 
                 onToggleLike(track);
               }}
-              className="w-14 h-14 flex items-center justify-center bg-neutral-800 hover:bg-neutral-700 rounded-full hover:scale-110 active:scale-95 transition-all duration-300"
+              className="w-12 h-12 flex items-center justify-center glass-light rounded-full hover:scale-110 active:scale-95 transition-all duration-300"
             >
               <svg
-                className={`w-7 h-7 transition-colors duration-200 ${
+                className={`w-6 h-6 transition-all duration-200 ${
                   isLiked(track.id)
-                    ? "fill-red-500 text-red-500"
+                    ? "fill-white text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.6)]"
                     : "fill-none text-white"
                 }`}
                 stroke="currentColor"
@@ -225,66 +270,65 @@ export default function PlayerUI({ onToggleLike, isLiked }: PlayerUIProps) {
             </button>
           )}
 
+          {/* Previous Button */}
+          <button
+            onClick={previousTrack}
+            className="w-10 h-10 flex items-center justify-center text-neutral-400 hover:text-white rounded-full hover:scale-110 active:scale-95 transition-all duration-300"
+          >
+            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+            </svg>
+          </button>
+
+          {/* Play/Pause Button */}
           <button
             onClick={playTrack}
-            className="w-14 h-14 flex items-center justify-center bg-white text-black rounded-full hover:scale-110 active:scale-95 transition-all duration-300 shadow-lg hover:shadow-white/20"
+            className="play-button w-16 h-16 flex items-center justify-center bg-white text-black rounded-full shadow-lg shadow-white/20"
           >
             {isPlaying ? (
-              <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
-                <path
-                  fillRule="evenodd"
-                  d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z"
-                  clipRule="evenodd"
-                />
+              <svg className="w-7 h-7" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
               </svg>
             ) : (
-              <svg
-                className="w-8 h-8"
-                fill="currentColor"
-                viewBox="0 0 20 20"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
-                  clipRule="evenodd"
-                />
+              <svg className="w-7 h-7" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z" />
               </svg>
             )}
           </button>
 
+          {/* Next Button */}
           <button
-            onClick={async () => {
-              try {
-                const response = await fetch(`${API_URL}/download?url=${encodeURIComponent(track.url)}`);
-                if (!response.ok) throw new Error('Download failed');
-                const blob = await response.blob();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `${track.artist} - ${track.title}.mp3`;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
-              } catch (error) {
-                console.error('Download error:', error);
-              }
-            }}
-            className="px-5 py-5 bg-neutral-800 hover:bg-neutral-700 rounded-full transition-all duration-300 flex items-center gap-2 hover:scale-105 active:scale-95 text-sm"
+            onClick={nextTrack}
+            className="w-10 h-10 flex items-center justify-center text-neutral-400 hover:text-white rounded-full hover:scale-110 active:scale-95 transition-all duration-300"
           >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-              />
+            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
             </svg>
+          </button>
+
+          {/* Download Button */}
+          <button
+            onClick={handleDownload}
+            disabled={isDownloading}
+            className="w-12 h-12 flex items-center justify-center glass-light rounded-full hover:scale-110 active:scale-95 transition-all duration-300 disabled:opacity-50"
+          >
+            {isDownloading ? (
+              <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+            ) : (
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                />
+              </svg>
+            )}
           </button>
         </div>
       </div>

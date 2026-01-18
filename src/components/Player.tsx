@@ -271,7 +271,7 @@ export default function Player({ track, onToggleLike, isLiked, onPlayingChange }
               <svg
                 className={`w-7 h-7 transition-colors duration-200 ${
                   isLiked(track.id)
-                    ? "fill-red-500 text-red-500"
+                    ? "fill-white text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.6)]"
                     : "fill-none text-white"
                 }`}
                 stroke="currentColor"

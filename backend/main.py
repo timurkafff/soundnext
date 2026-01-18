@@ -22,6 +22,7 @@ app = FastAPI(title="SoundCloud Music Server", version="1.0.0")
 
 # Глобальная переменная для кэширования client_id
 _cached_client_id = None
+_client_id_lock = asyncio.Lock()
 
 # Кастомная функция получения client_id
 async def get_client_id() -> str:
@@ -31,34 +32,39 @@ async def get_client_id() -> str:
     if _cached_client_id:
         return _cached_client_id
     
-    async with aiohttp.ClientSession() as session:
-        # Получаем главную страницу
-        async with session.get("https://soundcloud.com") as resp:
-            html = await resp.text()
+    async with _client_id_lock:
+        # Повторная проверка после получения блокировки
+        if _cached_client_id:
+            return _cached_client_id
         
-        # Ищем ссылки на скрипты
-        script_urls = re.findall(r'src="(https://a-v2\.sndcdn\.com/assets/[^"]+\.js)"', html)
-        
-        for script_url in script_urls:
-            try:
-                async with session.get(script_url) as resp:
-                    js_content = await resp.text()
-                
-                # Ищем client_id - должен быть ровно 32 символа
-                matches = re.findall(r'client_id["\s:=]+["\']([a-zA-Z0-9]{32})["\']', js_content)
-                
-                for client_id in matches:
-                    if len(client_id) == 32 and client_id.isalnum():
-                        # Проверяем, что это настоящий client_id (не содержит только буквы)
-                        has_digit = any(c.isdigit() for c in client_id)
-                        has_letter = any(c.isalpha() for c in client_id)
-                        if has_digit and has_letter:
-                            logger.info(f"Found client_id: {client_id[:8]}...")
-                            _cached_client_id = client_id
-                            return client_id
-            except Exception as e:
-                logger.warning(f"Failed to fetch script {script_url}: {e}")
-                continue
+        async with aiohttp.ClientSession() as session:
+            # Получаем главную страницу
+            async with session.get("https://soundcloud.com") as resp:
+                html = await resp.text()
+            
+            # Ищем ссылки на скрипты
+            script_urls = re.findall(r'src="(https://a-v2\.sndcdn\.com/assets/[^"]+\.js)"', html)
+            
+            for script_url in script_urls:
+                try:
+                    async with session.get(script_url) as resp:
+                        js_content = await resp.text()
+                    
+                    # Ищем client_id - должен быть ровно 32 символа
+                    matches = re.findall(r'client_id["\s:=]+["\']([a-zA-Z0-9]{32})["\']', js_content)
+                    
+                    for client_id in matches:
+                        if len(client_id) == 32 and client_id.isalnum():
+                            # Проверяем, что это настоящий client_id (не содержит только буквы)
+                            has_digit = any(c.isdigit() for c in client_id)
+                            has_letter = any(c.isalpha() for c in client_id)
+                            if has_digit and has_letter:
+                                logger.info(f"Found client_id: {client_id[:8]}...")
+                                _cached_client_id = client_id
+                                return client_id
+                except Exception as e:
+                    logger.warning(f"Failed to fetch script {script_url}: {e}")
+                    continue
     
     raise Exception("Could not find client_id")
 
@@ -80,18 +86,25 @@ def create_safe_filename(artist: str, title: str) -> str:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 api = SoundcloudAPI()
 TEMP_DIR = Path(tempfile.gettempdir()) / "soundcloud_downloads"
 TEMP_DIR.mkdir(exist_ok=True)
 
-DATA_DIR = Path.home() / ".soundnext"
+# Храним лайки рядом с бэкендом, а не в домашней директории
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / "soundnextsave"
 DATA_DIR.mkdir(exist_ok=True)
 LIKES_FILE = DATA_DIR / "liked_tracks.json"
+
+# Папка для офлайн-хранения лайкнутых треков
+OFFLINE_DIR = DATA_DIR / "offlinetrack"
+OFFLINE_DIR.mkdir(exist_ok=True)
 
 class TrackInfo(BaseModel):
     url: str
@@ -126,12 +139,26 @@ async def root():
         }
     }
 
+# Серверный кэш поиска
+_search_cache: dict[str, tuple[list, float]] = {}
+_SEARCH_CACHE_TTL = 300  # 5 минут
+
 @app.get("/search", response_model=SearchResult)
-async def search_tracks(q: str, limit: int = 20):
-    global _cached_client_id
+async def search_tracks(q: str, limit: int = 30):
+    global _cached_client_id, _search_cache
     
     if not q or len(q.strip()) < 2:
         raise HTTPException(status_code=400, detail="Query must be at least 2 characters")
+    
+    cache_key = f"{q.lower()}:{limit}"
+    
+    # Проверяем серверный кэш
+    if cache_key in _search_cache:
+        cached_tracks, timestamp = _search_cache[cache_key]
+        import time
+        if time.time() - timestamp < _SEARCH_CACHE_TTL:
+            logger.info(f"Returning cached search for: {q}")
+            return SearchResult(tracks=cached_tracks)
     
     try:
         logger.info(f"Searching for: {q}")
@@ -154,7 +181,8 @@ async def search_tracks(q: str, limit: int = 20):
             "offset": 0
         }
         
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(search_url, params=params) as response:
                 # Если 401 - сбрасываем кэш и получаем новый client_id
                 if response.status == 401:
@@ -190,6 +218,10 @@ async def search_tracks(q: str, limit: int = 20):
                 
                 if not tracks:
                     raise HTTPException(status_code=404, detail="No tracks found")
+                
+                # Сохраняем в серверный кэш
+                import time
+                _search_cache[cache_key] = (tracks, time.time())
                 
                 logger.info(f"Found {len(tracks)} tracks")
                 return SearchResult(tracks=tracks)
@@ -233,6 +265,8 @@ from fastapi import Request
 
 @app.get("/stream")
 async def stream_track(url: str, request: Request):
+    global _cached_client_id
+    
     if not url.startswith("https://soundcloud.com"):
         raise HTTPException(status_code=400, detail="Invalid SoundCloud URL")
     
@@ -247,6 +281,15 @@ async def stream_track(url: str, request: Request):
         
         for track_info in liked_tracks:
             if track_info.url == url:
+                # Сначала проверяем offline папку
+                offline_filename = create_safe_filename(track_info.artist, track_info.title)
+                offline_file = OFFLINE_DIR / offline_filename
+                if offline_file.exists() and offline_file.stat().st_size > 0:
+                    cached_track = track_info
+                    logger.info(f"Fast streaming from offline: {cached_track.artist} - {cached_track.title}")
+                    return await serve_file_with_range(offline_file, offline_filename, range_header)
+                
+                # Затем temp кэш
                 file_path = TEMP_DIR / f"{track_info.id}.mp3"
                 if file_path.exists() and file_path.stat().st_size > 0:
                     cached_track = track_info
@@ -255,7 +298,25 @@ async def stream_track(url: str, request: Request):
                     return await serve_file_with_range(file_path, filename, range_header)
                 break
         
-        track = await api.resolve(url)
+        # Убеждаемся что есть валидный client_id
+        if not api.client_id:
+            try:
+                await api.get_credentials()
+            except:
+                pass
+            if not api.client_id:
+                api.client_id = await get_client_id()
+        
+        # Пробуем resolve с retry при ошибке
+        try:
+            track = await api.resolve(url)
+            if not isinstance(track, Track):
+                raise ValueError("Not a track")
+        except Exception as resolve_err:
+            logger.warning(f"Resolve failed, refreshing client_id: {resolve_err}")
+            _cached_client_id = None
+            api.client_id = await get_client_id()
+            track = await api.resolve(url)
         
         if not isinstance(track, Track):
             raise HTTPException(status_code=400, detail="URL is not a valid track")
@@ -462,25 +523,56 @@ async def clear_cache():
 async def health_check():
     cache_files = len(list(TEMP_DIR.glob("*.mp3")))
     cache_size = sum(f.stat().st_size for f in TEMP_DIR.glob("*.mp3"))
+    offline_files = len(list(OFFLINE_DIR.glob("*.mp3")))
+    offline_size = sum(f.stat().st_size for f in OFFLINE_DIR.glob("*.mp3"))
     
     return {
         "status": "healthy",
         "temp_dir": str(TEMP_DIR),
+        "offline_dir": str(OFFLINE_DIR),
         "cache_files": cache_files,
-        "cache_size_mb": round(cache_size / (1024 * 1024), 2)
+        "cache_size_mb": round(cache_size / (1024 * 1024), 2),
+        "offline_files": offline_files,
+        "offline_size_mb": round(offline_size / (1024 * 1024), 2)
     }
 
 async def cache_liked_track(track: TrackInfo):
+    """Cache liked track to both temp and offline directories"""
     try:
-        file_path = TEMP_DIR / f"{track.id}.mp3"
+        temp_file = TEMP_DIR / f"{track.id}.mp3"
+        offline_filename = create_safe_filename(track.artist, track.title)
+        offline_file = OFFLINE_DIR / offline_filename
         
-        if file_path.exists():
-            logger.info(f"Track already cached: {track.artist} - {track.title}")
+        # Если уже есть в офлайн папке - пропускаем
+        if offline_file.exists() and offline_file.stat().st_size > 0:
+            logger.info(f"Track already saved offline: {track.artist} - {track.title}")
             return
         
-        logger.info(f"Caching liked track: {track.artist} - {track.title}")
+        logger.info(f"Caching liked track for offline: {track.artist} - {track.title}")
         
-        resolved_track = await api.resolve(track.url)
+        # Если есть в кэше - копируем
+        if temp_file.exists() and temp_file.stat().st_size > 0:
+            import shutil
+            shutil.copy2(temp_file, offline_file)
+            logger.info(f"Copied from cache to offline: {offline_filename}")
+            return
+        
+        # Убеждаемся что есть client_id
+        if not api.client_id:
+            try:
+                await api.get_credentials()
+            except:
+                pass
+            if not api.client_id:
+                api.client_id = await get_client_id()
+        
+        # Скачиваем напрямую через API
+        try:
+            resolved_track = await api.resolve(track.url)
+        except Exception as resolve_err:
+            logger.warning(f"Failed to resolve track, retrying with fresh client_id: {resolve_err}")
+            api.client_id = await get_client_id()
+            resolved_track = await api.resolve(track.url)
         
         if not isinstance(resolved_track, Track):
             logger.error(f"Could not resolve track: {track.url}")
@@ -490,10 +582,16 @@ async def cache_liked_track(track: TrackInfo):
             logger.warning(f"Track is not streamable: {track.artist} - {track.title}")
             return
         
-        with open(file_path, 'wb+') as file:
-            await resolved_track.write_mp3_to(file)
+        # Сохраняем в обе папки
+        with open(offline_file, 'wb+') as f:
+            await resolved_track.write_mp3_to(f)
         
-        logger.info(f"Successfully cached: {track.artist} - {track.title}")
+        # Копируем в temp для быстрого стриминга
+        if not temp_file.exists():
+            import shutil
+            shutil.copy2(offline_file, temp_file)
+        
+        logger.info(f"Successfully saved offline: {offline_filename}")
     except Exception as e:
         logger.error(f"Error caching track {track.artist} - {track.title}: {e}")
 
@@ -544,8 +642,6 @@ async def add_like(track: TrackInfo):
         likes.append(track)
         save_likes(likes)
         
-        asyncio.create_task(cache_liked_track(track))
-        
         logger.info(f"Added like: {track.artist} - {track.title}")
         return {"message": "Track liked", "count": len(likes)}
     except HTTPException:
@@ -560,20 +656,15 @@ async def remove_like(track_id: int):
         likes = load_likes()
         original_count = len(likes)
         
+        # Находим трек для получения имени файла
+        removed_track = next((t for t in likes if t.id == track_id), None)
+        
         likes = [t for t in likes if t.id != track_id]
         
         if len(likes) == original_count:
             raise HTTPException(status_code=404, detail="Track not found in likes")
         
         save_likes(likes)
-        
-        file_path = TEMP_DIR / f"{track_id}.mp3"
-        if file_path.exists():
-            try:
-                file_path.unlink()
-                logger.info(f"Removed cached file for unliked track: {track_id}")
-            except Exception as e:
-                logger.warning(f"Failed to remove cached file: {e}")
         
         logger.info(f"Removed like for track ID: {track_id}")
         return {"message": "Track unliked", "count": len(likes)}

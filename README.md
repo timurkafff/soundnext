@@ -89,16 +89,26 @@ choco install ffmpeg
 
 ### Running the Application
 
+**Quick Start (both frontend and backend):**
+```bash
+npm run dev
+```
+
+Or separately:
+
 1. **Start the backend server**
 ```bash
 cd backend
+source venv/bin/activate  # or on Windows: venv\Scripts\activate
 python main.py
 ```
-The API server will start at `http://localhost:8000`
+The API server will start at `https://localhost:8000` (HTTPS)
+
+> ⚠️ **First time setup**: Open https://localhost:8000 in your browser and accept the self-signed certificate
 
 2. **Start the frontend** (in a new terminal)
 ```bash
-npm run dev
+npm run frontend
 ```
 The website will be available at `http://localhost:3000`
 

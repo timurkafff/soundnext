@@ -2,6 +2,7 @@ fastapi
 uvicorn
 soundcloud-lib
 aiohttp
+aiohttp-socks
 python-multipart
 pywebview
 requests

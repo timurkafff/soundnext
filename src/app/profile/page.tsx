@@ -1,16 +1,18 @@
 "use client";
 
-import { useEffect } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import SearchBar from "@/components/SearchBar";
 import TrackList from "@/components/TrackList";
 import PlayerUI from "@/components/PlayerUI";
 import { useLikes } from "@/hooks/useLikes";
 import { useSearch } from "@/hooks/useSearch";
 import { usePlayer } from "@/contexts/PlayerContext";
+import { useSwipeNavigation } from "@/hooks/useSwipeNavigation";
 import { TrackInfo } from "@/types";
 
 export default function Profile() {
+  const router = useRouter();
   const { likedTracks, toggleLike, isLiked } = useLikes();
   const {
     searchQuery,
@@ -22,6 +24,25 @@ export default function Profile() {
   } = useSearch();
   const { currentTrack, isPlaying, setCurrentTrack, setPlaylist } = usePlayer();
 
+  const isNavigatingRef = useRef(false);
+
+  const swipeRef = useSwipeNavigation({
+    onSwipeLeft: () => {
+      const node = swipeRef.current;
+      if (isNavigatingRef.current) return;
+      isNavigatingRef.current = true;
+
+      if (node) {
+        node.classList.remove("swipe-out-left");
+        node.offsetWidth;
+        node.classList.add("swipe-out-left");
+        setTimeout(() => router.push("/", { scroll: false }), 280);
+      } else {
+        router.push("/", { scroll: false });
+      }
+    },
+  });
+
   const handleSelectTrack = (track: TrackInfo) => {
     setCurrentTrack(track);
   };
@@ -32,39 +53,22 @@ export default function Profile() {
     setPlaylist(displayTracks);
   }, [searchResults, likedTracks, searchQuery, setPlaylist]);
 
-  return (
-    <main className="h-screen bg-black text-white overflow-hidden flex flex-col">
-      <div className="container mx-auto px-4 py-6 max-w-6xl flex-1 flex flex-col overflow-hidden">
-        <div className="text-center mb-6 animate-fadeIn flex items-center justify-between">
-          <Link
-            href="/"
-            className="px-6 py-2.5 bg-neutral-800 hover:bg-neutral-700 rounded-2xl transition-all duration-300 flex items-center gap-2 hover:scale-105 active:scale-95"
-          >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M10 19l-7-7m0 0l7-7m-7 7h18"
-              />
-            </svg>
-          </Link>
+  useEffect(() => {
+    router.prefetch("/");
+  }, [router]);
 
+  return (
+    <main ref={swipeRef} className="h-screen bg-black text-white overflow-hidden flex flex-col">
+      <div className="container mx-auto px-4 py-6 max-w-6xl flex-1 flex flex-col overflow-hidden">
+        <div className="text-center mb-6 animate-fadeIn flex items-center justify-center gap-4">
           <div className="flex items-center gap-4">
             <h1 className="text-5xl font-bold mb-2 tracking-tight">
               Liked <span className="text-neutral-500">Tracks</span>
             </h1>
-            <div className="px-4 py-2 bg-red-500/20 rounded-full mb-2">
-              <span className="text-2xl font-bold text-red-500">{likedTracks.length}</span>
+            <div className="px-4 py-2 bg-white rounded-full mb-2">
+              <span className="text-2xl font-bold text-black">{likedTracks.length}</span>
             </div>
           </div>
-
-          <div className="w-32" />
         </div>
 
         <div className="mb-6">
